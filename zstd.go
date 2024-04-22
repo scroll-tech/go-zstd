@@ -4,7 +4,7 @@ package zstd
 // support decoding of "legacy" zstd payloads from versions [0.4, 0.8], matching the
 // default configuration of the zstd command line tool:
 // https://github.com/facebook/zstd/blob/dev/programs/README.md
-#cgo CFLAGS: -DZSTD_LEGACY_SUPPORT=4 -DZSTD_MULTITHREAD=1
+#cgo CFLAGS: -DZSTD_LEGACY_SUPPORT=4 -DZSTD_MULTITHREAD=1 -DZSTD_STATIC_LINKING_ONLY
 
 #include "zstd.h"
 */
@@ -12,6 +12,7 @@ import "C"
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"unsafe"
 )
@@ -38,6 +39,45 @@ const (
 
 	zstdFrameHeaderSizeMin = 2 // From zstd.h. Since it's experimental API, hardcoding it
 )
+
+var scrollCParams *C.ZSTD_CCtx
+
+func init() {
+	scrollCParams = C.ZSTD_createCCtx()
+	if scrollCParams == nil {
+		panic("ZSTD_createCCtx() failed")
+	}
+
+	// Set compression level to default compression level (3)
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_compressionLevel, C.int(3))); err != nil {
+		panic(fmt.Errorf("failed to set compression level: %v", err))
+	}
+
+	// Disable compression of literals
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_literalCompressionMode, C.ZSTD_ps_disable)); err != nil {
+		panic(fmt.Errorf("failed to disable literal compression: %v", err))
+	}
+
+	// Set target block size
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_targetCBlockSize, C.int(124*1024))); err != nil {
+		panic(fmt.Errorf("failed to set target block size: %v", err))
+	}
+
+	// Do not include checksum
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_checksumFlag, 0)); err != nil {
+		panic(fmt.Errorf("failed to disable checksum: %v", err))
+	}
+
+	// Do not include magic bytes
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_format, C.ZSTD_f_zstd1_magicless)); err != nil {
+		panic(fmt.Errorf("failed to set magicless format: %v", err))
+	}
+
+	// Include content size
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_contentSizeFlag, 1)); err != nil {
+		panic(fmt.Errorf("failed to enable content size flag: %v", err))
+	}
+}
 
 // CompressBound returns the worst case size needed for a destination buffer,
 // which can be used to preallocate a destination buffer or select a previously
@@ -89,6 +129,33 @@ func decompressSizeHint(src []byte) int {
 // will be allocated and returned.
 func Compress(dst, src []byte) ([]byte, error) {
 	return CompressLevel(dst, src, DefaultCompression)
+}
+
+// CompressScrollBatchBytes compresses batch bytes into blob bytes.
+func CompressScrollBatchBytes(src []byte) ([]byte, error) {
+	if len(src) == 0 {
+		return []byte{}, nil
+	}
+
+	dst := make([]byte, len(src))
+	result := C.ZSTD_compress2(
+		scrollCParams,
+		unsafe.Pointer(&dst[0]), C.size_t(len(dst)),
+		unsafe.Pointer(&src[0]), C.size_t(len(src)),
+	)
+
+	if err := checkError(result); err != nil {
+		return nil, err
+	}
+
+	return dst[:result], nil
+}
+
+func checkError(code C.size_t) error {
+	if C.ZSTD_isError(code) != 0 {
+		return fmt.Errorf("zstd error: %s", C.GoString(C.ZSTD_getErrorName(code)))
+	}
+	return nil
 }
 
 // CompressLevel is the same as Compress but you can pass a compression level
