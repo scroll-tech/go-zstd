@@ -48,8 +48,8 @@ func init() {
 		panic("ZSTD_createCCtx() failed")
 	}
 
-	// Set compression level to default compression level (3)
-	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_compressionLevel, C.int(3))); err != nil {
+	// Set compression level to compression level (22)
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_compressionLevel, C.int(22))); err != nil {
 		panic(fmt.Errorf("failed to set compression level: %v", err))
 	}
 
@@ -63,6 +63,16 @@ func init() {
 		panic(fmt.Errorf("failed to set target block size: %v", err))
 	}
 
+	// Set windows log to 17
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_windowLog, C.int(17))); err != nil {
+		panic(fmt.Errorf("failed to set window log: %v", err))
+	}
+
+	// Do not include dictionary
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_dictIDFlag, 0)); err != nil {
+		panic(fmt.Errorf("failed to disable dictionary ID: %v", err))
+	}
+
 	// Do not include checksum
 	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_checksumFlag, 0)); err != nil {
 		panic(fmt.Errorf("failed to disable checksum: %v", err))
@@ -73,8 +83,8 @@ func init() {
 		panic(fmt.Errorf("failed to set magicless format: %v", err))
 	}
 
-	// Include content size
-	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_contentSizeFlag, 1)); err != nil {
+	// Do not include content size
+	if err := checkError(C.ZSTD_CCtx_setParameter(scrollCParams, C.ZSTD_c_contentSizeFlag, 0)); err != nil {
 		panic(fmt.Errorf("failed to enable content size flag: %v", err))
 	}
 }
